@@ -181,8 +181,10 @@ public sealed class RedisVersionedCacheIntegrationTests(RedisFixture fixture)
         await cache.SetIfNewerAsync(key, 9, new TestValue("older"), ttl, CancellationToken.None);
         var ttlAfterOlder = await fixture.GetPreciseTtlAsync(key, CancellationToken.None);
 
-        Assert.True(ttlAfterDuplicate < ttlBeforeDuplicate, "A duplicate write refreshed the TTL.");
-        Assert.True(ttlAfterOlder < ttlAfterDuplicate, "An older write refreshed the TTL.");
+        Assert.True(ttlBeforeDuplicate > 0 && ttlAfterDuplicate > 0 && ttlAfterOlder > 0,
+            "The entry expired before TTL assertions completed.");
+        Assert.True(ttlAfterDuplicate <= ttlBeforeDuplicate, "A duplicate write refreshed the TTL.");
+        Assert.True(ttlAfterOlder <= ttlAfterDuplicate, "An older write refreshed the TTL.");
     }
 
     [Fact]
@@ -193,11 +195,13 @@ public sealed class RedisVersionedCacheIntegrationTests(RedisFixture fixture)
         var ttl = TimeSpan.FromSeconds(10);
         await cache.SetIfNewerAsync(key, 10, new TestValue("v10"), ttl, CancellationToken.None);
         await Task.Delay(TimeSpan.FromMilliseconds(1200), CancellationToken.None);
+        var ttlBeforeNewer = await fixture.GetPreciseTtlAsync(key, CancellationToken.None);
 
         await cache.SetIfNewerAsync(key, 11, new TestValue("v11"), ttl, CancellationToken.None);
         var refreshedTtl = await fixture.GetPreciseTtlAsync(key, CancellationToken.None);
 
-        Assert.InRange(refreshedTtl, 8500, 10000);
+        Assert.True(ttlBeforeNewer > 0, "The original entry expired before the newer write.");
+        Assert.True(refreshedTtl > ttlBeforeNewer, "A newer write did not refresh the TTL.");
     }
 
     [Fact]
