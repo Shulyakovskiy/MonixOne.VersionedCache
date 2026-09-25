@@ -1,0 +1,28 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MonixOne.VersionedCache", "src\\MonixOne.VersionedCache\\MonixOne.VersionedCache.csproj", "{A5E18C8E-33D0-4F16-BF0E-5A224B387C8E}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MonixOne.VersionedCache.Tests", "tests\\MonixOne.VersionedCache.Tests\\MonixOne.VersionedCache.Tests.csproj", "{D0CB164F-3E9B-4F95-9C2A-4F3A57676E36}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MonixOne.VersionedCache.IntegrationTests", "tests\\MonixOne.VersionedCache.IntegrationTests\\MonixOne.VersionedCache.IntegrationTests.csproj", "{1B8A63ED-E6B4-42D4-92AB-39158D305B94}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{A5E18C8E-33D0-4F16-BF0E-5A224B387C8E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A5E18C8E-33D0-4F16-BF0E-5A224B387C8E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A5E18C8E-33D0-4F16-BF0E-5A224B387C8E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A5E18C8E-33D0-4F16-BF0E-5A224B387C8E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D0CB164F-3E9B-4F95-9C2A-4F3A57676E36}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D0CB164F-3E9B-4F95-9C2A-4F3A57676E36}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D0CB164F-3E9B-4F95-9C2A-4F3A57676E36}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D0CB164F-3E9B-4F95-9C2A-4F3A57676E36}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1B8A63ED-E6B4-42D4-92AB-39158D305B94}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1B8A63ED-E6B4-42D4-92AB-39158D305B94}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1B8A63ED-E6B4-42D4-92AB-39158D305B94}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1B8A63ED-E6B4-42D4-92AB-39158D305B94}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal
