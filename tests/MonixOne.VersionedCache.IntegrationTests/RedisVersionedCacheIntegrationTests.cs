@@ -32,6 +32,67 @@ public sealed class RedisVersionedCacheIntegrationTests(RedisFixture fixture)
     }
 
     [Fact]
+    public async Task GetManyAsync_ReturnsEntriesMissesAndTombstonesByKey()
+    {
+        var cache = fixture.CreateCache();
+        var activeKey = NewKey();
+        var missingKey = NewKey();
+        var deletedKey = NewKey();
+        await cache.SetIfNewerAsync(activeKey, 10, new TestValue("active"), Ttl, CancellationToken.None);
+        await cache.SetTombstoneIfNewerAsync(deletedKey, 11, Ttl, CancellationToken.None);
+
+        var entries = await cache.GetManyAsync<TestValue>(
+            [activeKey, missingKey, deletedKey, activeKey], CancellationToken.None);
+
+        Assert.Equal(3, entries.Count);
+        AssertEntry(entries[activeKey], 10, false, "active");
+        Assert.Null(entries[missingKey]);
+        AssertEntry(entries[deletedKey], 11, true, null);
+    }
+
+    [Fact]
+    public async Task GetManyAsync_ReadsKeysAcrossBatchBoundary()
+    {
+        var cache = fixture.CreateCache();
+        var keys = Enumerable.Range(0, 260).Select(static _ => NewKey()).ToArray();
+        await cache.SetIfNewerAsync(keys[255], 10, new TestValue("first batch"), Ttl, CancellationToken.None);
+        await cache.SetIfNewerAsync(keys[256], 11, new TestValue("second batch"), Ttl, CancellationToken.None);
+
+        var entries = await cache.GetManyAsync<TestValue>(keys, CancellationToken.None);
+
+        Assert.Equal(keys.Length, entries.Count);
+        Assert.Null(entries[keys[0]]);
+        AssertEntry(entries[keys[255]], 10, false, "first batch");
+        AssertEntry(entries[keys[256]], 11, false, "second batch");
+        Assert.Null(entries[keys[^1]]);
+    }
+
+    [Fact]
+    public async Task GetManyAsync_RejectsInvalidKeysBeforeReading()
+    {
+        var cache = fixture.CreateCache();
+
+        await Assert.ThrowsAsync<ArgumentNullException>(
+            () => cache.GetManyAsync<TestValue>(null!, CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => cache.GetManyAsync<TestValue>([NewKey(), " "], CancellationToken.None));
+        Assert.Empty(await cache.GetManyAsync<TestValue>([], CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task GetManyAsync_PropagatesCorruptedEntry()
+    {
+        var cache = fixture.CreateCache();
+        var key = NewKey();
+        await fixture.Connection.GetDatabase().HashSetAsync(key, "other", "value");
+
+        var exception = await Assert.ThrowsAsync<VersionedCacheCorruptedEntryException>(
+            () => cache.GetManyAsync<TestValue>([NewKey(), key], CancellationToken.None));
+
+        Assert.Equal(key, exception.Key);
+    }
+
+    [Fact]
     public async Task SetIfNewerAsync_RejectsDuplicateAndOlderWritesWithoutReplacingPayload()
     {
         var cache = fixture.CreateCache();

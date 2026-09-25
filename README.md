@@ -69,6 +69,19 @@ await versionedCache.SetTombstoneIfNewerAsync(
 `GetAsync<T>` возвращает `null` для отсутствующего ключа и
 `VersionedCacheEntry<T> { IsDeleted = true, Value = null }` для tombstone.
 
+Для чтения набора известных ключей используйте `GetManyAsync<T>`:
+
+```csharp
+var entries = await versionedCache.GetManyAsync<ProfileCacheModel>(
+    profileKeys,
+    cancellationToken);
+```
+
+Результат содержит каждый уникальный ключ. Отсутствующий ключ соответствует `null`,
+tombstone остаётся `VersionedCacheEntry<T>` с `IsDeleted = true`. Чтения выполняются
+отдельными Redis `HGETALL` порциями до 256 ключей. Результат не является согласованным
+снимком нескольких ключей; перечисления ключей по префиксу нет.
+
 ## Гарантии записи
 
 Запись хранится как Redis Hash с полями `v` (version), `d` (deleted) и `p` (UTF-8 JSON
@@ -112,3 +125,14 @@ versioned_cache_operation_duration_seconds
 Redis errors не скрываются и не превращаются в cache miss; retry — ответственность
 приложения или queue consumer. Повреждённая Redis Hash запись вызывает
 `VersionedCacheCorruptedEntryException` без включения payload в сообщение.
+
+## CI и публикация
+
+`ci.yml` при push и pull request собирает solution, запускает unit и Redis
+Testcontainers тесты, затем собирает NuGet-пакет. Публикация из `publish.yml`
+выполняется только после merge pull request в `main` и повторяет эти проверки.
+
+Для публикации настройте GitHub environment `production`, секрет `NUGET_USER` с
+именем аккаунта NuGet.org (не email) и NuGet.org Trusted Publisher для этого
+репозитория, workflow `publish.yml` и environment `production`. Перед новым выпуском
+обновите `Version` в `src/MonixOne.VersionedCache/MonixOne.VersionedCache.csproj`.

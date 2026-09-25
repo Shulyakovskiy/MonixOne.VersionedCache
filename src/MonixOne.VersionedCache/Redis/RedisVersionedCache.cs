@@ -14,7 +14,7 @@ namespace MonixOne.VersionedCache.Redis;
 /// </summary>
 public sealed class RedisVersionedCache : IVersionedCache
 {
-    private static readonly RedisValue[] ReadFields = ["v", "d", "p"];
+    private const int MaxConcurrentReads = 256;
 
     private readonly IDatabase _database;
     private readonly JsonSerializerOptions _serializerOptions;
@@ -41,34 +41,90 @@ public sealed class RedisVersionedCache : IVersionedCache
     {
         ValidateKey(key);
 
-        var values = await _database.HashGetAsync(key, ReadFields).WaitAsync(cancellationToken)
+        var fields = await _database.HashGetAllAsync(key).WaitAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        if (values.All(static value => value.IsNull))
+        if (fields.Length == 0)
         {
             return null;
         }
 
-        if (values.Length != ReadFields.Length || values.Any(static value => value.IsNull))
+        RedisValue versionValue = default;
+        RedisValue deletedValue = default;
+        RedisValue payloadValue = default;
+        foreach (var field in fields)
+        {
+            if (field.Name == "v")
+            {
+                versionValue = field.Value;
+            }
+            else if (field.Name == "d")
+            {
+                deletedValue = field.Value;
+            }
+            else if (field.Name == "p")
+            {
+                payloadValue = field.Value;
+            }
+        }
+
+        if (versionValue.IsNull || deletedValue.IsNull || payloadValue.IsNull)
         {
             throw new VersionedCacheCorruptedEntryException(key, "one or more required hash fields are missing");
         }
 
-        var versionText = values[0].ToString();
+        var versionText = versionValue.ToString();
         if (!long.TryParse(versionText, NumberStyles.None, CultureInfo.InvariantCulture, out var version) || version <= 0)
         {
             throw new VersionedCacheCorruptedEntryException(key, "field 'v' is not a positive Int64");
         }
 
-        var deleted = values[1].ToString();
+        var deleted = deletedValue.ToString();
         return deleted switch
         {
-            "1" when values[2].IsNullOrEmpty => new VersionedCacheEntry<T>(version, true, default),
+            "1" when payloadValue.IsNullOrEmpty => new VersionedCacheEntry<T>(version, true, default),
             "1" => throw new VersionedCacheCorruptedEntryException(key, "tombstone payload must be empty"),
-            "0" when !values[2].IsNullOrEmpty => new VersionedCacheEntry<T>(version, false, Deserialize<T>(key, values[2])),
+            "0" when !payloadValue.IsNullOrEmpty => new VersionedCacheEntry<T>(version, false, Deserialize<T>(key, payloadValue)),
             "0" => throw new VersionedCacheCorruptedEntryException(key, "non-deleted entry payload is missing"),
             _ => throw new VersionedCacheCorruptedEntryException(key, "field 'd' must be '0' or '1'")
         };
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<string, VersionedCacheEntry<T>?>> GetManyAsync<T>(
+        IReadOnlyCollection<string> keys,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(keys);
+
+        var distinctKeys = keys.Distinct(StringComparer.Ordinal).ToArray();
+        foreach (var key in distinctKeys)
+        {
+            ValidateKey(key);
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var result = new Dictionary<string, VersionedCacheEntry<T>?>(distinctKeys.Length, StringComparer.Ordinal);
+        for (var offset = 0; offset < distinctKeys.Length; offset += MaxConcurrentReads)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var count = Math.Min(MaxConcurrentReads, distinctKeys.Length - offset);
+            var reads = new Task<VersionedCacheEntry<T>?>[count];
+            for (var index = 0; index < count; index++)
+            {
+                reads[index] = GetAsync<T>(distinctKeys[offset + index], cancellationToken);
+            }
+
+            var entries = await Task.WhenAll(reads).ConfigureAwait(false);
+            for (var index = 0; index < count; index++)
+            {
+                result.Add(distinctKeys[offset + index], entries[index]);
+            }
+        }
+
+        return result;
     }
 
     /// <inheritdoc />
