@@ -16,6 +16,15 @@ public interface IVersionedCache
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Gets cached projections for the supplied keys. Every distinct key is present in the result;
+    /// a missing key maps to <see langword="null"/>. Duplicate keys are read once.
+    /// Reads of different keys do not form a consistent snapshot.
+    /// </summary>
+    Task<IReadOnlyDictionary<string, VersionedCacheEntry<T>?>> GetManyAsync<T>(
+        IReadOnlyCollection<string> keys,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Stores <paramref name="value"/> only when <paramref name="version"/> is newer than the
     /// version currently stored for <paramref name="key"/>. Duplicate and stale writes do not
     /// change the payload or refresh the TTL.
