@@ -1,9 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
-using MonixOne.VersionedCache.Abstractions;
-using MonixOne.VersionedCache.Configuration;
-using MonixOne.VersionedCache.Redis;
 
-namespace MonixOne.VersionedCache.DependencyInjection;
+namespace MonixOne.VersionedCache;
 
 /// <summary>
 /// Registers version-aware Redis cache services.

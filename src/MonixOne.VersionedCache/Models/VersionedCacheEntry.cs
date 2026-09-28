@@ -1,4 +1,4 @@
-namespace MonixOne.VersionedCache.Models;
+namespace MonixOne.VersionedCache;
 
 /// <summary>
 /// A cached projection together with the entity version used to create it.

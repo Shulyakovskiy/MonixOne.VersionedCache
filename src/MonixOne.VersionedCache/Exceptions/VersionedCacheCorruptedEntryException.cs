@@ -1,4 +1,4 @@
-namespace MonixOne.VersionedCache.Exceptions;
+namespace MonixOne.VersionedCache;
 
 /// <summary>
 /// Thrown when an existing Redis hash does not satisfy the versioned-cache representation contract.

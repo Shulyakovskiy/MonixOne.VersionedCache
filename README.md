@@ -9,6 +9,8 @@ Redis остаётся disposable cache. PostgreSQL (или другая осн�
 
 ## Установка и регистрация
 
+Для всего публичного API достаточно одного `using MonixOne.VersionedCache;`.
+
 Приложение само создаёт и регистрирует один `IConnectionMultiplexer`; пакет не открывает
 соединения на каждый запрос.
 
@@ -30,7 +32,7 @@ request-specific state.
 ```csharp
 var key = $"beetroute-profile:profile:v1:{{{profileId}}}";
 
-var result = await versionedCache.SetIfNewerAsync(
+var result = await versionedCache.SetAsync(
     key,
     version: profile.Version,
     value: new ProfileCacheModel(profile.Id, profile.DisplayName),
@@ -59,7 +61,7 @@ if (result.Status == CacheWriteStatus.Written)
 событию воскресить удалённую сущность.
 
 ```csharp
-await versionedCache.SetTombstoneIfNewerAsync(
+await versionedCache.DeleteAsync(
     key,
     version: deletedProfile.Version,
     ttl: TimeSpan.FromDays(1),

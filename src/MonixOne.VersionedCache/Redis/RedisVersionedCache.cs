@@ -1,13 +1,10 @@
 using System.Globalization;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
-using MonixOne.VersionedCache.Abstractions;
-using MonixOne.VersionedCache.Configuration;
-using MonixOne.VersionedCache.Exceptions;
-using MonixOne.VersionedCache.Models;
+using MonixOne.VersionedCache.Redis;
 using StackExchange.Redis;
 
-namespace MonixOne.VersionedCache.Redis;
+namespace MonixOne.VersionedCache;
 
 /// <summary>
 /// Redis hash implementation of <see cref="IVersionedCache"/>.
@@ -128,7 +125,7 @@ public sealed class RedisVersionedCache : IVersionedCache
     }
 
     /// <inheritdoc />
-    public Task<CacheWriteResult> SetIfNewerAsync<T>(
+    public Task<CacheWriteResult> SetAsync<T>(
         string key,
         long version,
         T value,
@@ -137,7 +134,7 @@ public sealed class RedisVersionedCache : IVersionedCache
     {
         ArgumentNullException.ThrowIfNull(value);
 
-        return SetAsync(
+        return WriteAsync(
             key,
             version,
             isDeleted: false,
@@ -147,14 +144,14 @@ public sealed class RedisVersionedCache : IVersionedCache
     }
 
     /// <inheritdoc />
-    public Task<CacheWriteResult> SetTombstoneIfNewerAsync(
+    public Task<CacheWriteResult> DeleteAsync(
         string key,
         long version,
         TimeSpan ttl,
         CancellationToken cancellationToken = default) =>
-        SetAsync(key, version, isDeleted: true, Array.Empty<byte>(), ttl, cancellationToken);
+        WriteAsync(key, version, isDeleted: true, Array.Empty<byte>(), ttl, cancellationToken);
 
-    private async Task<CacheWriteResult> SetAsync(
+    private async Task<CacheWriteResult> WriteAsync(
         string key,
         long version,
         bool isDeleted,

@@ -1,7 +1,6 @@
 using System.Text.Json;
-using MonixOne.VersionedCache.Abstractions;
 
-namespace MonixOne.VersionedCache.Configuration;
+namespace MonixOne.VersionedCache;
 
 /// <summary>
 /// Configures serialization used by <see cref="IVersionedCache"/>.

@@ -1,4 +1,4 @@
-namespace MonixOne.VersionedCache.Models;
+namespace MonixOne.VersionedCache;
 
 /// <summary>
 /// Describes whether an attempted versioned cache write changed Redis.
