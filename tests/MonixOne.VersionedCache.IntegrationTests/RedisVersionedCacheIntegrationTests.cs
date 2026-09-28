@@ -1,8 +1,5 @@
 using Microsoft.Extensions.Options;
-using MonixOne.VersionedCache.Configuration;
-using MonixOne.VersionedCache.Exceptions;
-using MonixOne.VersionedCache.Models;
-using MonixOne.VersionedCache.Redis;
+using MonixOne.VersionedCache;
 using StackExchange.Redis;
 using Testcontainers.Redis;
 using Xunit;
@@ -18,13 +15,13 @@ public sealed class RedisVersionedCacheIntegrationTests(RedisFixture fixture)
     private static readonly TimeSpan Ttl = TimeSpan.FromMinutes(10);
 
     [Fact]
-    public async Task SetIfNewerAsync_WritesAndReadsNormalEntry()
+    public async Task SetAsync_WritesAndReadsNormalEntry()
     {
         var cache = fixture.CreateCache();
         var key = NewKey();
         var value = new TestValue("Привет, cache");
 
-        var result = await cache.SetIfNewerAsync(key, 10, value, Ttl, CancellationToken.None);
+        var result = await cache.SetAsync(key, 10, value, Ttl, CancellationToken.None);
         var entry = await cache.GetAsync<TestValue>(key, CancellationToken.None);
 
         Assert.Equal(new CacheWriteResult(CacheWriteStatus.Written, 10), result);
@@ -38,8 +35,8 @@ public sealed class RedisVersionedCacheIntegrationTests(RedisFixture fixture)
         var activeKey = NewKey();
         var missingKey = NewKey();
         var deletedKey = NewKey();
-        await cache.SetIfNewerAsync(activeKey, 10, new TestValue("active"), Ttl, CancellationToken.None);
-        await cache.SetTombstoneIfNewerAsync(deletedKey, 11, Ttl, CancellationToken.None);
+        await cache.SetAsync(activeKey, 10, new TestValue("active"), Ttl, CancellationToken.None);
+        await cache.DeleteAsync(deletedKey, 11, Ttl, CancellationToken.None);
 
         var entries = await cache.GetManyAsync<TestValue>(
             [activeKey, missingKey, deletedKey, activeKey], CancellationToken.None);
@@ -55,8 +52,8 @@ public sealed class RedisVersionedCacheIntegrationTests(RedisFixture fixture)
     {
         var cache = fixture.CreateCache();
         var keys = Enumerable.Range(0, 260).Select(static _ => NewKey()).ToArray();
-        await cache.SetIfNewerAsync(keys[255], 10, new TestValue("first batch"), Ttl, CancellationToken.None);
-        await cache.SetIfNewerAsync(keys[256], 11, new TestValue("second batch"), Ttl, CancellationToken.None);
+        await cache.SetAsync(keys[255], 10, new TestValue("first batch"), Ttl, CancellationToken.None);
+        await cache.SetAsync(keys[256], 11, new TestValue("second batch"), Ttl, CancellationToken.None);
 
         var entries = await cache.GetManyAsync<TestValue>(keys, CancellationToken.None);
 
@@ -93,14 +90,14 @@ public sealed class RedisVersionedCacheIntegrationTests(RedisFixture fixture)
     }
 
     [Fact]
-    public async Task SetIfNewerAsync_RejectsDuplicateAndOlderWritesWithoutReplacingPayload()
+    public async Task SetAsync_RejectsDuplicateAndOlderWritesWithoutReplacingPayload()
     {
         var cache = fixture.CreateCache();
         var key = NewKey();
-        await cache.SetIfNewerAsync(key, 10, new TestValue("v10"), Ttl, CancellationToken.None);
+        await cache.SetAsync(key, 10, new TestValue("v10"), Ttl, CancellationToken.None);
 
-        var duplicate = await cache.SetIfNewerAsync(key, 10, new TestValue("duplicate"), Ttl, CancellationToken.None);
-        var older = await cache.SetIfNewerAsync(key, 9, new TestValue("older"), Ttl, CancellationToken.None);
+        var duplicate = await cache.SetAsync(key, 10, new TestValue("duplicate"), Ttl, CancellationToken.None);
+        var older = await cache.SetAsync(key, 9, new TestValue("older"), Ttl, CancellationToken.None);
         var entry = await cache.GetAsync<TestValue>(key, CancellationToken.None);
 
         Assert.Equal(new CacheWriteResult(CacheWriteStatus.IgnoredSameVersion, 10), duplicate);
@@ -126,10 +123,10 @@ public sealed class RedisVersionedCacheIntegrationTests(RedisFixture fixture)
     {
         var cache = fixture.CreateCache();
         var key = NewKey();
-        await cache.SetIfNewerAsync(key, 10, new TestValue("active"), Ttl, CancellationToken.None);
+        await cache.SetAsync(key, 10, new TestValue("active"), Ttl, CancellationToken.None);
 
-        var tombstone = await cache.SetTombstoneIfNewerAsync(key, 11, Ttl, CancellationToken.None);
-        var stale = await cache.SetIfNewerAsync(key, 10, new TestValue("late"), Ttl, CancellationToken.None);
+        var tombstone = await cache.DeleteAsync(key, 11, Ttl, CancellationToken.None);
+        var stale = await cache.SetAsync(key, 10, new TestValue("late"), Ttl, CancellationToken.None);
         var entry = await cache.GetAsync<TestValue>(key, CancellationToken.None);
 
         Assert.Equal(new CacheWriteResult(CacheWriteStatus.Written, 11), tombstone);
@@ -152,18 +149,18 @@ public sealed class RedisVersionedCacheIntegrationTests(RedisFixture fixture)
     }
 
     [Fact]
-    public async Task SetIfNewerAsync_ValidatesCallerInput()
+    public async Task SetAsync_ValidatesCallerInput()
     {
         var cache = fixture.CreateCache();
 
         await Assert.ThrowsAsync<ArgumentException>(
-            () => cache.SetIfNewerAsync(" ", 1, new TestValue("value"), Ttl, CancellationToken.None));
+            () => cache.SetAsync(" ", 1, new TestValue("value"), Ttl, CancellationToken.None));
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
-            () => cache.SetIfNewerAsync(NewKey(), 0, new TestValue("value"), Ttl, CancellationToken.None));
+            () => cache.SetAsync(NewKey(), 0, new TestValue("value"), Ttl, CancellationToken.None));
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
-            () => cache.SetIfNewerAsync(NewKey(), 1, new TestValue("value"), TimeSpan.Zero, CancellationToken.None));
+            () => cache.SetAsync(NewKey(), 1, new TestValue("value"), TimeSpan.Zero, CancellationToken.None));
         await Assert.ThrowsAsync<ArgumentNullException>(
-            () => cache.SetIfNewerAsync<string>(NewKey(), 1, null!, Ttl, CancellationToken.None));
+            () => cache.SetAsync<string>(NewKey(), 1, null!, Ttl, CancellationToken.None));
     }
 
     [Fact]
@@ -172,13 +169,13 @@ public sealed class RedisVersionedCacheIntegrationTests(RedisFixture fixture)
         var cache = fixture.CreateCache();
         var key = NewKey();
         var ttl = TimeSpan.FromSeconds(10);
-        await cache.SetIfNewerAsync(key, 10, new TestValue("v10"), ttl, CancellationToken.None);
+        await cache.SetAsync(key, 10, new TestValue("v10"), ttl, CancellationToken.None);
         await Task.Delay(TimeSpan.FromMilliseconds(1200), CancellationToken.None);
         var ttlBeforeDuplicate = await fixture.GetPreciseTtlAsync(key, CancellationToken.None);
 
-        await cache.SetIfNewerAsync(key, 10, new TestValue("duplicate"), ttl, CancellationToken.None);
+        await cache.SetAsync(key, 10, new TestValue("duplicate"), ttl, CancellationToken.None);
         var ttlAfterDuplicate = await fixture.GetPreciseTtlAsync(key, CancellationToken.None);
-        await cache.SetIfNewerAsync(key, 9, new TestValue("older"), ttl, CancellationToken.None);
+        await cache.SetAsync(key, 9, new TestValue("older"), ttl, CancellationToken.None);
         var ttlAfterOlder = await fixture.GetPreciseTtlAsync(key, CancellationToken.None);
 
         Assert.True(ttlBeforeDuplicate > 0 && ttlAfterDuplicate > 0 && ttlAfterOlder > 0,
@@ -193,11 +190,11 @@ public sealed class RedisVersionedCacheIntegrationTests(RedisFixture fixture)
         var cache = fixture.CreateCache();
         var key = NewKey();
         var ttl = TimeSpan.FromSeconds(10);
-        await cache.SetIfNewerAsync(key, 10, new TestValue("v10"), ttl, CancellationToken.None);
+        await cache.SetAsync(key, 10, new TestValue("v10"), ttl, CancellationToken.None);
         await Task.Delay(TimeSpan.FromMilliseconds(1200), CancellationToken.None);
         var ttlBeforeNewer = await fixture.GetPreciseTtlAsync(key, CancellationToken.None);
 
-        await cache.SetIfNewerAsync(key, 11, new TestValue("v11"), ttl, CancellationToken.None);
+        await cache.SetAsync(key, 11, new TestValue("v11"), ttl, CancellationToken.None);
         var refreshedTtl = await fixture.GetPreciseTtlAsync(key, CancellationToken.None);
 
         Assert.True(ttlBeforeNewer > 0, "The original entry expired before the newer write.");
@@ -212,7 +209,7 @@ public sealed class RedisVersionedCacheIntegrationTests(RedisFixture fixture)
         var versions = Enumerable.Range(1, 100).OrderBy(static _ => Random.Shared.Next()).ToArray();
 
         await Task.WhenAll(versions.Select(version =>
-            cache.SetIfNewerAsync(key, version, new TestValue($"v{version}"), Ttl, CancellationToken.None)));
+            cache.SetAsync(key, version, new TestValue($"v{version}"), Ttl, CancellationToken.None)));
 
         var entry = await cache.GetAsync<TestValue>(key, CancellationToken.None);
         AssertEntry(entry, 100, false, "v100");
@@ -228,7 +225,7 @@ public sealed class RedisVersionedCacheIntegrationTests(RedisFixture fixture)
             .ToArray();
 
         await Task.WhenAll(versions.Select(version =>
-            cache.SetIfNewerAsync(key, version, new TestValue($"v{version}"), Ttl, CancellationToken.None)));
+            cache.SetAsync(key, version, new TestValue($"v{version}"), Ttl, CancellationToken.None)));
 
         var entry = await cache.GetAsync<TestValue>(key, CancellationToken.None);
         AssertEntry(entry, 500, false, "v500");
@@ -241,10 +238,10 @@ public sealed class RedisVersionedCacheIntegrationTests(RedisFixture fixture)
         var key = NewKey();
         var operations = new Task<CacheWriteResult>[]
         {
-            cache.SetIfNewerAsync(key, 100, new TestValue("v100"), Ttl, CancellationToken.None),
-            cache.SetTombstoneIfNewerAsync(key, 101, Ttl, CancellationToken.None),
-            cache.SetIfNewerAsync(key, 99, new TestValue("v99"), Ttl, CancellationToken.None),
-            cache.SetIfNewerAsync(key, 98, new TestValue("v98"), Ttl, CancellationToken.None)
+            cache.SetAsync(key, 100, new TestValue("v100"), Ttl, CancellationToken.None),
+            cache.DeleteAsync(key, 101, Ttl, CancellationToken.None),
+            cache.SetAsync(key, 99, new TestValue("v99"), Ttl, CancellationToken.None),
+            cache.SetAsync(key, 98, new TestValue("v98"), Ttl, CancellationToken.None)
         };
 
         await Task.WhenAll(operations);
@@ -263,9 +260,9 @@ public sealed class RedisVersionedCacheIntegrationTests(RedisFixture fixture)
     {
         var cache = fixture.CreateCache();
         var key = NewKey();
-        await cache.SetIfNewerAsync(key, lowerVersion, new TestValue($"v{lowerVersion}"), Ttl, CancellationToken.None);
+        await cache.SetAsync(key, lowerVersion, new TestValue($"v{lowerVersion}"), Ttl, CancellationToken.None);
 
-        var result = await cache.SetIfNewerAsync(key, higherVersion, new TestValue($"v{higherVersion}"), Ttl, CancellationToken.None);
+        var result = await cache.SetAsync(key, higherVersion, new TestValue($"v{higherVersion}"), Ttl, CancellationToken.None);
         var entry = await cache.GetAsync<TestValue>(key, CancellationToken.None);
 
         Assert.Equal(new CacheWriteResult(CacheWriteStatus.Written, higherVersion), result);
@@ -277,7 +274,7 @@ public sealed class RedisVersionedCacheIntegrationTests(RedisFixture fixture)
     private static async Task AssertRoundTripAsync<T>(RedisVersionedCache cache, T value)
     {
         var key = NewKey();
-        await cache.SetIfNewerAsync(key, 1, value, Ttl, CancellationToken.None);
+        await cache.SetAsync(key, 1, value, Ttl, CancellationToken.None);
         var entry = await cache.GetAsync<T>(key, CancellationToken.None);
 
         Assert.NotNull(entry);

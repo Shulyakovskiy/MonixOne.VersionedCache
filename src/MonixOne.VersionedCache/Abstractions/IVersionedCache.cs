@@ -1,6 +1,4 @@
-using MonixOne.VersionedCache.Models;
-
-namespace MonixOne.VersionedCache.Abstractions;
+namespace MonixOne.VersionedCache;
 
 /// <summary>
 /// Stores cache projections so an older entity version cannot overwrite a newer one.
@@ -29,7 +27,7 @@ public interface IVersionedCache
     /// version currently stored for <paramref name="key"/>. Duplicate and stale writes do not
     /// change the payload or refresh the TTL.
     /// </summary>
-    Task<CacheWriteResult> SetIfNewerAsync<T>(
+    Task<CacheWriteResult> SetAsync<T>(
         string key,
         long version,
         T value,
@@ -40,7 +38,7 @@ public interface IVersionedCache
     /// Stores a versioned deletion marker only when <paramref name="version"/> is newer. The
     /// tombstone prevents delayed older messages from resurrecting an entity until its TTL expires.
     /// </summary>
-    Task<CacheWriteResult> SetTombstoneIfNewerAsync(
+    Task<CacheWriteResult> DeleteAsync(
         string key,
         long version,
         TimeSpan ttl,

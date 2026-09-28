@@ -7,7 +7,7 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <IsPackable>true</IsPackable>
     <PackageId>MonixOne.VersionedCache</PackageId>
-    <Version>1.0.0</Version>
+    <Version>1.1.0</Version>
     <Authors>MonixOne</Authors>
     <Description>Atomic version-aware Redis cache for distributed .NET services.</Description>
     <PackageTags>redis;cache;versioning;distributed</PackageTags>

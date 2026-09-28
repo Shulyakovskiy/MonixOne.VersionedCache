@@ -1,4 +1,4 @@
-namespace MonixOne.VersionedCache.Models;
+namespace MonixOne.VersionedCache;
 
 /// <summary>
 /// The outcome of an atomic versioned write, including the version retained in Redis.
