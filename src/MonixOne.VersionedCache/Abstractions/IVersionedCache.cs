@@ -2,7 +2,8 @@ namespace MonixOne.VersionedCache;
 
 /// <summary>
 /// Stores cache projections so an older entity version cannot overwrite a newer one.
-/// Cache keys are supplied by the caller and Redis is never treated as a source of truth.
+/// Logical cache keys are supplied by the caller; the configured environment and service prefix is
+/// applied to every Redis operation. Redis is never treated as a source of truth.
 /// </summary>
 public interface IVersionedCache
 {

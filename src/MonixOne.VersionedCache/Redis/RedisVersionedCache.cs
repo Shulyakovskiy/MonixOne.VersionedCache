@@ -14,6 +14,7 @@ public sealed class RedisVersionedCache : IVersionedCache
     private const int MaxConcurrentReads = 256;
 
     private readonly IDatabase _database;
+    private readonly string _keyPrefix;
     private readonly JsonSerializerOptions _serializerOptions;
 
     /// <summary>
@@ -26,9 +27,21 @@ public sealed class RedisVersionedCache : IVersionedCache
         ArgumentNullException.ThrowIfNull(connectionMultiplexer);
         ArgumentNullException.ThrowIfNull(options);
 
-        _database = connectionMultiplexer.GetDatabase();
-        _serializerOptions = options.Value.SerializerOptions
+        var cacheOptions = options.Value;
+        if (!cacheOptions.HasValidEnvironmentName)
+        {
+            throw new ArgumentException(VersionedCacheOptions.InvalidEnvironmentNameMessage, nameof(options));
+        }
+
+        if (!cacheOptions.HasValidServiceName)
+        {
+            throw new ArgumentException(VersionedCacheOptions.InvalidServiceNameMessage, nameof(options));
+        }
+
+        _keyPrefix = $"{cacheOptions.EnvironmentName}:{cacheOptions.ServiceName}:";
+        _serializerOptions = cacheOptions.SerializerOptions
             ?? throw new ArgumentException("Serializer options must not be null.", nameof(options));
+        _database = connectionMultiplexer.GetDatabase();
     }
 
     /// <inheritdoc />
@@ -38,7 +51,7 @@ public sealed class RedisVersionedCache : IVersionedCache
     {
         ValidateKey(key);
 
-        var fields = await _database.HashGetAllAsync(key).WaitAsync(cancellationToken)
+        var fields = await _database.HashGetAllAsync($"{_keyPrefix}{key}").WaitAsync(cancellationToken)
             .ConfigureAwait(false);
 
         if (fields.Length == 0)
@@ -168,7 +181,7 @@ public sealed class RedisVersionedCache : IVersionedCache
                 RedisScripts.SetIfNewer,
                 new
                 {
-                    key = (RedisKey)key,
+                    key = (RedisKey)$"{_keyPrefix}{key}",
                     version = version.ToString(CultureInfo.InvariantCulture),
                     deleted = isDeleted ? "1" : "0",
                     payload = (RedisValue)payload,

@@ -15,22 +15,92 @@ Redis остаётся disposable cache. PostgreSQL (или другая осн�
 соединения на каждый запрос.
 
 ```csharp
-services.AddSingleton<IConnectionMultiplexer>(
-    _ => ConnectionMultiplexer.Connect(configuration.GetConnectionString("Redis")!));
+var builder = WebApplication.CreateBuilder(args);
 
-services.AddVersionedCache(options =>
-{
-    options.SerializerOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
-});
+builder.Services.AddSingleton<IConnectionMultiplexer>(
+    _ => ConnectionMultiplexer.Connect(builder.Configuration.GetConnectionString("Redis")!));
+
+builder.Services.AddVersionedCache();
 ```
 
 `IVersionedCache` и `RedisVersionedCache` имеют singleton lifetime и не хранят
 request-specific state.
 
+## Конфигурация
+
+В `appsettings.json` сервиса укажите его уникальное имя и подключение к Redis:
+
+```json
+{
+  "Service": {
+    "Name": "identity-service"
+  },
+  "ConnectionStrings": {
+    "Redis": "localhost:6379"
+  }
+}
+```
+
+`Service:Name` обязателен и автоматически читается из `IConfiguration`. Окружение
+автоматически берётся из `IHostEnvironment.EnvironmentName`. Для регистрации достаточно
+`builder.Services.AddVersionedCache()`; вручную передавать env и имя сервиса не нужно.
+Приложение регистрирует `IConnectionMultiplexer`, как показано выше.
+
+Для локального запуска задайте окружение через стандартный .NET host:
+
+```sh
+DOTNET_ENVIRONMENT=Development dotnet run
+```
+
+В deployment эти настройки можно передать переменными окружения:
+
+```text
+DOTNET_ENVIRONMENT=Production
+Service__Name=identity-service
+ConnectionStrings__Redis=redis:6379
+```
+
+`__` разделяет уровни конфигурации: `Service__Name` соответствует `Service:Name`.
+ASP.NET Core также поддерживает `ASPNETCORE_ENVIRONMENT`. Библиотека использует
+окружение и конфигурацию host, а не читает переменные окружения самостоятельно.
+
+## Изоляция окружений и сервисов
+
+Библиотека добавляет префикс `{environment}:{service}:` ко всем Redis-ключам при записи,
+чтении, `GetManyAsync` и записи tombstone. Один логический ключ `profile:v1:{id}`
+хранится отдельно для каждой пары окружения и сервиса:
+
+```text
+Development:identity-service:profile:v1:{id}
+Production:identity-service:profile:v1:{id}
+Production:profile-service:profile:v1:{id}
+```
+
+Все экземпляры и consumers одного сервиса в одном окружении должны использовать
+одинаковые имена, с учётом регистра. Разным сервисам задавайте разные `Service:Name`.
+В каждом deployment проверьте имя окружения host: стандартное значение по умолчанию —
+`Production`.
+
+Для обоих имён запрещены пустое значение, пробельные символы, `:`, `{` и `}`. Настройки
+проверяются при запуске host и при создании cache. Отсутствующие `Service:Name`,
+`IHostEnvironment` или `IConfiguration` приводят к ошибке. При прямом создании
+`RedisVersionedCache` через `new` нужно явно задать `VersionedCacheOptions.EnvironmentName`
+и `ServiceName`.
+
+Префикс сохраняет hash tag сущности для Redis Cluster. В API передавайте логические
+ключи без env и имени сервиса; `GetManyAsync` возвращает словарь с исходными ключами.
+
+При обновлении до `2.0.0` проверьте окружение и `Service:Name`. Старые
+ключи без нового префикса `{environment}:{service}:` не читаются и не изменяются: cache
+наполняется заново из основной БД или событий, старые записи остаются до истечения
+своего TTL. Перед переключением учитывайте потерю доступа к старым tombstone:
+восстановите актуальные версии из source of truth, прежде чем обрабатывать запоздалые
+события.
+
 ## Использование
 
 ```csharp
-var key = $"beetroute-profile:profile:v1:{{{profileId}}}";
+var key = $"profile:v1:{{{profileId}}}";
 
 var result = await versionedCache.SetAsync(
     key,
@@ -45,10 +115,10 @@ if (result.Status == CacheWriteStatus.Written)
 }
 ```
 
-Формат ключа рекомендуемый, но не навязывается библиотекой:
+Формат логического ключа рекомендуемый, но не навязывается библиотекой:
 
 ```text
-{namespace}:{projection}:v{schemaVersion}:{entityId}
+{projection}:v{schemaVersion}:{entityId}
 ```
 
 `v1` в ключе — версия схемы cache model. Поле Redis `v` — монотонная версия конкретной
