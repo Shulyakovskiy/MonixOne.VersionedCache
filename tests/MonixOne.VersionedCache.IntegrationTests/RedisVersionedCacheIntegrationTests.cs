@@ -1,3 +1,7 @@
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using MonixOne.VersionedCache;
 using StackExchange.Redis;
@@ -26,6 +30,100 @@ public sealed class RedisVersionedCacheIntegrationTests(RedisFixture fixture)
 
         Assert.Equal(new CacheWriteResult(CacheWriteStatus.Written, 10), result);
         AssertEntry(entry, 10, false, "Привет, cache");
+    }
+
+    [Theory]
+    [InlineData("dev", "identity-service", "prod", "identity-service")]
+    [InlineData("prod", "identity-service", "prod", "profile-service")]
+    public async Task Registration_IsolatesWritesAndReadsByEnvironmentAndService(
+        string firstEnvironment, string firstService, string secondEnvironment, string secondService)
+    {
+        using var firstProvider = CreateServiceProvider(firstEnvironment, firstService);
+        using var secondProvider = CreateServiceProvider(secondEnvironment, secondService);
+        var firstCache = firstProvider.GetRequiredService<IVersionedCache>();
+        var secondCache = secondProvider.GetRequiredService<IVersionedCache>();
+        var key = NewKey();
+
+        await secondCache.SetAsync(key, 100, new TestValue("second"), Ttl);
+        Assert.Null(await firstCache.GetAsync<TestValue>(key));
+        var result = await firstCache.SetAsync(key, 1, new TestValue("first"), Ttl);
+
+        Assert.Equal(new CacheWriteResult(CacheWriteStatus.Written, 1), result);
+        AssertEntry(await firstCache.GetAsync<TestValue>(key), 1, false, "first");
+        AssertEntry(await secondCache.GetAsync<TestValue>(key), 100, false, "second");
+        var database = fixture.Connection.GetDatabase();
+        Assert.Equal("1", (string?)await database.HashGetAsync($"{firstEnvironment}:{firstService}:{key}", "v"));
+        Assert.Equal("100", (string?)await database.HashGetAsync($"{secondEnvironment}:{secondService}:{key}", "v"));
+        Assert.False(await database.KeyExistsAsync(key));
+    }
+
+    [Theory]
+    [InlineData("prod", "identity-service")]
+    [InlineData("dev", "profile-service")]
+    public async Task DeleteAsync_AndGetManyAsync_AreIsolatedByEnvironmentAndService(
+        string secondEnvironment, string secondService)
+    {
+        using var firstProvider = CreateServiceProvider("dev", "identity-service");
+        using var secondProvider = CreateServiceProvider(secondEnvironment, secondService);
+        var firstCache = firstProvider.GetRequiredService<IVersionedCache>();
+        var secondCache = secondProvider.GetRequiredService<IVersionedCache>();
+        var key = NewKey();
+        var secondOnlyKey = NewKey();
+        await secondCache.SetAsync(key, 100, new TestValue("second"), Ttl);
+        await secondCache.SetAsync(secondOnlyKey, 101, new TestValue("second only"), Ttl);
+
+        var deleted = await firstCache.DeleteAsync(key, 2, Ttl);
+        var stale = await firstCache.SetAsync(key, 1, new TestValue("late first"), Ttl);
+        var firstEntries = await firstCache.GetManyAsync<TestValue>([key, secondOnlyKey, key]);
+        var secondEntries = await secondCache.GetManyAsync<TestValue>([key, secondOnlyKey]);
+
+        Assert.Equal(new CacheWriteResult(CacheWriteStatus.Written, 2), deleted);
+        Assert.Equal(new CacheWriteResult(CacheWriteStatus.IgnoredOlderVersion, 2), stale);
+        Assert.Equal(2, firstEntries.Count);
+        AssertEntry(firstEntries[key], 2, true, null);
+        Assert.Null(firstEntries[secondOnlyKey]);
+        AssertEntry(secondEntries[key], 100, false, "second");
+        AssertEntry(secondEntries[secondOnlyKey], 101, false, "second only");
+    }
+
+    [Fact]
+    public async Task UnprefixedEntry_IsNotReadOrModified()
+    {
+        var cache = fixture.CreateCache();
+        var key = NewKey();
+        var database = fixture.Connection.GetDatabase();
+        await database.HashSetAsync(key,
+        [
+            new HashEntry("v", "100"),
+            new HashEntry("d", "0"),
+            new HashEntry("p", "{\"name\":\"legacy\"}")
+        ]);
+
+        Assert.Null(await cache.GetAsync<TestValue>(key));
+        var result = await cache.SetAsync(key, 1, new TestValue("isolated"), Ttl);
+
+        Assert.Equal(new CacheWriteResult(CacheWriteStatus.Written, 1), result);
+        AssertEntry(await cache.GetAsync<TestValue>(key), 1, false, "isolated");
+        Assert.Equal("100", (string?)await database.HashGetAsync(key, "v"));
+        Assert.Equal("{\"name\":\"legacy\"}", (string?)await database.HashGetAsync(key, "p"));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("dev:profile")]
+    [InlineData("{dev}")]
+    public void Constructor_RejectsInvalidEnvironment(string environmentName)
+    {
+        Assert.Throws<ArgumentException>(() => fixture.CreateCache(environmentName));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("identity:service")]
+    [InlineData("{identity}")]
+    public void Constructor_RejectsInvalidServiceName(string serviceName)
+    {
+        Assert.Throws<ArgumentException>(() => fixture.CreateCache(serviceName: serviceName));
     }
 
     [Fact]
@@ -81,7 +179,7 @@ public sealed class RedisVersionedCacheIntegrationTests(RedisFixture fixture)
     {
         var cache = fixture.CreateCache();
         var key = NewKey();
-        await fixture.Connection.GetDatabase().HashSetAsync(key, "other", "value");
+        await fixture.Connection.GetDatabase().HashSetAsync($"test:identity-service:{key}", "other", "value");
 
         var exception = await Assert.ThrowsAsync<VersionedCacheCorruptedEntryException>(
             () => cache.GetManyAsync<TestValue>([NewKey(), key], CancellationToken.None));
@@ -139,7 +237,7 @@ public sealed class RedisVersionedCacheIntegrationTests(RedisFixture fixture)
     {
         var cache = fixture.CreateCache();
         var key = NewKey();
-        await fixture.Connection.GetDatabase().HashSetAsync(key, "d", "0");
+        await fixture.Connection.GetDatabase().HashSetAsync($"test:identity-service:{key}", "d", "0");
 
         var exception = await Assert.ThrowsAsync<VersionedCacheCorruptedEntryException>(
             () => cache.GetAsync<TestValue>(key, CancellationToken.None));
@@ -269,6 +367,18 @@ public sealed class RedisVersionedCacheIntegrationTests(RedisFixture fixture)
         AssertEntry(entry, higherVersion, false, $"v{higherVersion}");
     }
 
+    private ServiceProvider CreateServiceProvider(string environmentName, string serviceName)
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IHostEnvironment>(new TestHostEnvironment(environmentName));
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Service:Name"] = serviceName })
+            .Build());
+        services.AddSingleton(fixture.Connection);
+        services.AddVersionedCache();
+        return services.BuildServiceProvider();
+    }
+
     private static string NewKey() => $"versioned-cache:test:v1:{{{Guid.NewGuid():N}}}";
 
     private static async Task AssertRoundTripAsync<T>(RedisVersionedCache cache, T value)
@@ -296,6 +406,14 @@ public sealed class RedisVersionedCacheIntegrationTests(RedisFixture fixture)
     public sealed record NestedValue(string Name, string? OptionalValue, ChildValue Child);
 
     public sealed record ChildValue(string Name, DateTimeOffset ChangedAt);
+
+    private sealed class TestHostEnvironment(string environmentName) : IHostEnvironment
+    {
+        public string EnvironmentName { get; set; } = environmentName;
+        public string ApplicationName { get; set; } = "VersionedCache.IntegrationTests";
+        public string ContentRootPath { get; set; } = AppContext.BaseDirectory;
+        public IFileProvider ContentRootFileProvider { get; set; } = new NullFileProvider();
+    }
 }
 
 public sealed class RedisFixture : IAsyncLifetime
@@ -319,9 +437,10 @@ public sealed class RedisFixture : IAsyncLifetime
         await _container.DisposeAsync();
     }
 
-    public RedisVersionedCache CreateCache() => new(
+    public RedisVersionedCache CreateCache(
+        string environmentName = "test", string serviceName = "identity-service") => new(
         _connectionMultiplexer ?? throw new InvalidOperationException("Redis fixture is not initialized."),
-        Options.Create(new VersionedCacheOptions()));
+        Options.Create(new VersionedCacheOptions { EnvironmentName = environmentName, ServiceName = serviceName }));
 
     public IConnectionMultiplexer Connection =>
         _connectionMultiplexer ?? throw new InvalidOperationException("Redis fixture is not initialized.");
@@ -330,7 +449,7 @@ public sealed class RedisFixture : IAsyncLifetime
     {
         var result = await (_connectionMultiplexer ?? throw new InvalidOperationException("Redis fixture is not initialized."))
             .GetDatabase()
-            .ExecuteAsync("PTTL", key)
+            .ExecuteAsync("PTTL", $"test:identity-service:{key}")
             .WaitAsync(cancellationToken);
 
         return (long)result;
